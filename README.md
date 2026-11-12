@@ -39,39 +39,45 @@ Each test creates its own booking and deletes it afterwards, so the suite does n
 | Delete | DELETE with a valid token removes the booking, and GET then returns 404 |
 | Negative | Missing `lastname`, `totalprice` or `bookingdates` returns 400 |
 | Boundary | Checkout before checkin is rejected |
-| Negative | Invalid dates (`not-a-date`, `2027-02-30`) are rejected |
+| Negative | Invalid dates (`not-a-date`, `2030-02-30`) are rejected |
 | Boundary | Negative total price is rejected |
 
 Tests marked `known_api_bug` assert what the API *should* do. They fail against the current API and are left failing on purpose rather than adjusted to pass.
 
 ## Results summary
 
-Run on 12 Nov 2026: **11 passed, 8 failed.** All 8 failures are real API bugs, not test problems.
+Run on 12 Nov 2026: **11 passed, 8 failed.** The 8 failing tests come from **5 distinct issues** (some tests run the same check with several inputs). None of the failures is a problem in the tests themselves.
 
-| Test | Result | Real API bug? | What happens |
-|---|---|---|---|
-| Auth, create, read, update, delete (happy paths) | Pass | - | Behaves as documented |
-| No token / invalid token on PUT and DELETE | Pass | - | 403, data unchanged |
-| Unknown booking returns 404 | Pass | - | 404 |
-| Wrong password rejected | **Fail** | Yes | Returns **200** with `{"reason": "Bad credentials"}` instead of 401 |
-| Missing `lastname` / `totalprice` / `bookingdates` | **Fail** (3) | Yes | Returns **500 Internal Server Error** instead of 400. Bad input crashes the server |
-| Checkout before checkin | **Fail** | Yes | Booking created with checkout 4 days before checkin |
-| Checkin `not-a-date` | **Fail** | Yes | Accepted and stored as `0NaN-aN-aN` (corrupt data) |
-| Checkin `2027-02-30` | **Fail** | Yes | Accepted and silently changed to `2027-03-02` |
-| Negative total price | **Fail** | Yes | Booking created with `totalprice: -1` |
+Restful-Booker's documentation does not define validation rules, so I have separated issues that are defects whatever the requirements are from ones that depend on a business rule I assumed.
 
-Observations not turned into failing tests (they match Restful-Booker's own documentation, but differ from common REST conventions):
+| # | Issue | Failing tests | Classification | What happens |
+|---|---|---|---|---|
+| 1 | Missing required fields crash the server | 3 (`lastname`, `totalprice`, `bookingdates`) | **Defect** whatever the requirements: client input should never cause a 500 | Returns **500 Internal Server Error** instead of 400 |
+| 2 | Invalid dates are stored as corrupt or altered data | 2 (`not-a-date`, `2030-02-30`) | **Defect** whatever the requirements: data is corrupted or silently changed | `not-a-date` is stored as `0NaN-aN-aN`; 30 Feb silently becomes 2 Mar |
+| 3 | Wrong password returns 200 | 1 | **Likely defect**: breaks HTTP convention; the docs do not specify the failure response | Returns **200** with `{"reason": "Bad credentials"}` instead of 401 |
+| 4 | Checkout before checkin is accepted | 1 | **Assumed requirement**: to confirm with the product owner | Booking created with checkout 4 days before checkin |
+| 5 | Negative total price is accepted | 1 | **Assumed requirement**: to confirm with the product owner | Booking created with `totalprice: -1` |
+
+Observations not turned into failing tests (they match Restful-Booker's own documentation, but differ from common REST conventions; also noted as comments in the tests):
 - Create returns 200 rather than 201 Created.
 - Successful delete returns 201 rather than 200 or 204.
 - Deleting an already deleted booking returns 405 rather than 404.
 - A missing token returns 403 rather than 401.
 
+**Why the GitHub Actions check is red:** the brief asked for tests to fail when the API is wrong rather than be adjusted to pass. To run only the tests expected to pass, use `pytest -m "not known_api_bug"`.
+
 ## AI tool notes
 
-Claude (Anthropic) wrote the first draft of the project: fixtures, test cases, the `known_api_bug` marker and this README. Before writing tests it called the API directly to confirm real behaviour, so expected results were based on observed responses and the documentation rather than guesses.
+I used Claude (Anthropic) to draft this project. It first called the API directly to confirm real behaviour, then wrote the fixtures, tests and README. I then reviewed the draft and asked for these changes:
 
-<!-- Replace with your own words: what you reviewed, changed or rejected. For example: -->
-<!-- I reviewed every test against the API docs, ran the suite myself, and changed/rejected ... -->
+- **Grouped the 8 failures into 5 issues.** The draft reported "8 real API bugs", but several tests check the same root cause with different inputs. Counting them separately overstated the findings.
+- **Separated defects from assumptions.** The draft called every failure a "real API bug". The documentation does not define rules for negative prices or date order, so I labelled those as assumed requirements to confirm, rather than claim more certainty than I have.
+- **Replaced fixed 2027 dates with dates relative to today.** Fixed dates would eventually fall in the past and the tests would quietly start testing something else.
+- **Made an authentication failure obvious.** The API returns 200 even for bad credentials, so a login problem showed up as a confusing `KeyError` in every test. It now fails with a clear message.
+- **Made the cleanup check more robust.** It now reads the parsed JSON instead of searching the raw response text for "bookingid".
+- **Added comments where tests accept documented quirks** (200 on create, 201 on delete), so a reader doesn't mistake them for oversights.
+
+I kept the deliberately failing tests and the red CI check because the brief asked for that, and I ran the suite locally and in GitHub Actions to confirm the results.
 
 ## With more time I would
 
