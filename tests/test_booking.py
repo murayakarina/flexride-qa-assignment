@@ -5,13 +5,16 @@ They are left failing on purpose (see README results summary).
 """
 import pytest
 
-from conftest import TIMEOUT, USERNAME
+from conftest import TIMEOUT, USERNAME, future_date
 
 
 def delete_if_created(api, base_url, token, response):
     """Clean up a booking that a negative test expected to be rejected but the API accepted."""
-    if response.status_code == 200 and "bookingid" in response.text:
-        api.delete(f"{base_url}/booking/{response.json()['bookingid']}", cookies={"token": token}, timeout=TIMEOUT)
+    if response.status_code != 200:
+        return
+    booking_id = response.json().get("bookingid")
+    if booking_id is not None:
+        api.delete(f"{base_url}/booking/{booking_id}", cookies={"token": token}, timeout=TIMEOUT)
 
 
 # --- Auth ---
@@ -34,6 +37,7 @@ def test_auth_with_wrong_password_is_rejected(api, base_url):
 def test_create_booking_matches_request(api, base_url, token, booking_payload):
     response = api.post(f"{base_url}/booking", json=booking_payload, timeout=TIMEOUT)
     try:
+        # Restful-Booker documents 200 for create (REST convention would be 201 Created).
         assert response.status_code == 200
         body = response.json()
         assert isinstance(body["bookingid"], int)
@@ -93,7 +97,7 @@ def test_delete_without_valid_token_is_rejected(api, base_url, created_booking, 
 def test_delete_booking_and_confirm_gone(api, base_url, token, created_booking):
     booking_id, _ = created_booking
     response = api.delete(f"{base_url}/booking/{booking_id}", cookies={"token": token}, timeout=TIMEOUT)
-    # Restful-Booker documents 201 for a successful delete.
+    # Restful-Booker documents 201 for a successful delete (REST convention would be 200 or 204).
     assert response.status_code == 201
 
     assert api.get(f"{base_url}/booking/{booking_id}", timeout=TIMEOUT).status_code == 404
@@ -113,14 +117,14 @@ def test_create_with_missing_required_field_returns_400(api, base_url, token, bo
 
 @pytest.mark.known_api_bug
 def test_create_with_checkout_before_checkin_is_rejected(api, base_url, token, booking_payload):
-    booking_payload["bookingdates"] = {"checkin": "2027-03-05", "checkout": "2027-03-01"}
+    booking_payload["bookingdates"] = {"checkin": future_date(34), "checkout": future_date(30)}
     response = api.post(f"{base_url}/booking", json=booking_payload, timeout=TIMEOUT)
     delete_if_created(api, base_url, token, response)
     assert response.status_code == 400
 
 
 @pytest.mark.known_api_bug
-@pytest.mark.parametrize("bad_date", ["not-a-date", "2027-02-30"], ids=["text", "impossible_date"])
+@pytest.mark.parametrize("bad_date", ["not-a-date", "2030-02-30"], ids=["text", "impossible_date"])
 def test_create_with_invalid_date_is_rejected(api, base_url, token, booking_payload, bad_date):
     booking_payload["bookingdates"]["checkin"] = bad_date
     response = api.post(f"{base_url}/booking", json=booking_payload, timeout=TIMEOUT)

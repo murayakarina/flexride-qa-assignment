@@ -1,6 +1,7 @@
 """Shared fixtures for the Restful-Booker API tests."""
 import os
 import uuid
+from datetime import date, timedelta
 
 import pytest
 import requests
@@ -10,6 +11,11 @@ BASE_URL = os.getenv("BOOKER_BASE_URL", "https://restful-booker.herokuapp.com")
 USERNAME = os.getenv("BOOKER_USERNAME", "admin")
 PASSWORD = os.getenv("BOOKER_PASSWORD", "password123")
 TIMEOUT = 15
+
+
+def future_date(days_ahead):
+    """An ISO date relative to today, so test dates never drift into the past."""
+    return (date.today() + timedelta(days=days_ahead)).isoformat()
 
 
 @pytest.fixture(scope="session")
@@ -31,7 +37,10 @@ def token(api, base_url):
     """A valid auth token for update and delete requests."""
     response = api.post(f"{base_url}/auth", json={"username": USERNAME, "password": PASSWORD}, timeout=TIMEOUT)
     response.raise_for_status()
-    return response.json()["token"]
+    body = response.json()
+    # Restful-Booker returns 200 even for bad credentials, so check the body for a clear failure message.
+    assert "token" in body, f"Auth failed, so update/delete tests cannot run: {body}"
+    return body["token"]
 
 
 @pytest.fixture
@@ -42,7 +51,7 @@ def booking_payload():
         "lastname": f"Test-{uuid.uuid4().hex[:8]}",
         "totalprice": 150,
         "depositpaid": True,
-        "bookingdates": {"checkin": "2027-03-01", "checkout": "2027-03-05"},
+        "bookingdates": {"checkin": future_date(30), "checkout": future_date(34)},
         "additionalneeds": "Breakfast",
     }
 
